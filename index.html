@@ -198,8 +198,8 @@
       text-transform: uppercase;
       letter-spacing: .6px;
     }
-    .cat-oda      { background: var(--blue-light);   color: var(--blue); }
-    .cat-qtc      { background: var(--purple-light); color: var(--purple); }
+    .cat-work     { background: var(--blue-light);   color: var(--blue); }
+    .cat-project  { background: var(--purple-light); color: var(--purple); }
     .cat-personal { background: var(--green-light);  color: #2e9a6a; }
 
     /* mini progress under group header */
@@ -745,8 +745,8 @@
         <div class="f-group">
           <label class="f-label" for="f-cat">Category</label>
           <select class="f-select" id="f-cat">
-            <option value="oda">Oda</option>
-            <option value="qtc">QTC</option>
+            <option value="work">Work</option>
+            <option value="project">Project</option>
             <option value="personal">Personal</option>
           </select>
         </div>
@@ -833,7 +833,7 @@ const SAMPLE = [
     id: 'task-1',
     name: 'Launch my portfolio site',
     description: 'A simple site to show off my work and start getting freelance leads.',
-    category: 'oda',
+    category: 'work',
     effort: 'medium',
     startDate: offsetDate(-2),
     dueDate: offsetDate(5),
@@ -859,7 +859,7 @@ const SAMPLE = [
     id: 'task-2',
     name: 'Reclaim the home office',
     description: "It's gotten chaotic. Goal: a calm, clear space I actually want to sit in.",
-    category: 'qtc',
+    category: 'project',
     effort: 'large',
     startDate: T,
     dueDate: offsetDate(10),
