@@ -272,6 +272,24 @@
       font-weight: 500;
       color: var(--text-primary);
       line-height: 1.45;
+      cursor: text;
+      border-radius: 4px;
+      transition: background var(--transition);
+    }
+    .subtask-title:hover { background: var(--surface-alt); }
+    .subtask-title.editing { background: transparent; }
+    .title-edit-input {
+      width: 100%;
+      border: none;
+      border-bottom: 2px solid var(--blue);
+      background: transparent;
+      font-size: 14px;
+      font-weight: 500;
+      font-family: inherit;
+      color: var(--text-primary);
+      line-height: 1.45;
+      outline: none;
+      padding: 0 2px;
     }
     .card-meta {
       display: flex;
@@ -965,7 +983,7 @@ function makeSubtaskCard(task, st, showParent) {
       </div>
       <div class="card-body">
         ${showParent ? `<div class="card-parent">${esc(task.name)}</div>` : ''}
-        <div class="subtask-title">${esc(st.title)}</div>
+        <div class="subtask-title" title="Click to edit">${esc(st.title)}</div>
         <div class="card-meta">
           ${st.estimatedMinutes ? `<span class="time-chip">⏱ ${st.estimatedMinutes} min</span>` : ''}
         </div>
@@ -978,8 +996,11 @@ function makeSubtaskCard(task, st, showParent) {
 
   // checkbox interaction
   const cb = card.querySelector('.cb');
-  cb.addEventListener('click',    () => toggleSubtask(task.id, st.id, cb));
-  cb.addEventListener('keydown',  e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); cb.click(); }});
+  cb.addEventListener('click',   () => toggleSubtask(task.id, st.id, cb));
+  cb.addEventListener('keydown', e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); cb.click(); }});
+
+  // inline title editing
+  bindTitleEdit(card.querySelector('.subtask-title'), task, st);
 
   // notes auto-save + auto-resize
   const ta = card.querySelector('textarea');
@@ -988,6 +1009,38 @@ function makeSubtaskCard(task, st, showParent) {
   ta.addEventListener('change', () => saveNotes(task.id, st.id, ta.value));
 
   return card;
+}
+
+function bindTitleEdit(titleEl, task, st) {
+  titleEl.addEventListener('click', () => {
+    if (titleEl.querySelector('input')) return; // already editing
+    const prev = st.title;
+    titleEl.classList.add('editing');
+    titleEl.innerHTML = `<input class="title-edit-input" value="${esc(prev)}" />`;
+    const input = titleEl.querySelector('input');
+    input.focus();
+    input.setSelectionRange(0, input.value.length);
+
+    function commit() {
+      const val = input.value.trim() || prev;
+      st.title = val;
+      save();
+      titleEl.classList.remove('editing');
+      titleEl.textContent = val;
+      bindTitleEdit(titleEl, task, st);
+    }
+    function cancel() {
+      titleEl.classList.remove('editing');
+      titleEl.textContent = prev;
+      bindTitleEdit(titleEl, task, st);
+    }
+
+    input.addEventListener('blur', commit);
+    input.addEventListener('keydown', e => {
+      if (e.key === 'Enter')  { e.preventDefault(); input.blur(); }
+      if (e.key === 'Escape') { e.preventDefault(); input.removeEventListener('blur', commit); cancel(); }
+    });
+  });
 }
 
 function autoResize(el) { el.style.height = 'auto'; el.style.height = el.scrollHeight + 'px'; }
@@ -1277,6 +1330,175 @@ function spawnConfetti(origin) {
   }
 }
 
+/* ══════════════════════════════════════════════════════════════════════════
+   TASK DECOMPOSITION ENGINE
+   ══════════════════════════════════════════════════════════════════════════ */
+
+/* Return YYYY-MM-DD strings for every day from startDate up to (not including)
+   dueDate, then pop the last day as a buffer. Handles edge cases gracefully. */
+function workingDays(startDate, dueDate) {
+  const start = new Date(startDate + 'T00:00:00');
+  const due   = new Date(dueDate   + 'T00:00:00');
+  const days  = [];
+  const cur   = new Date(start);
+  while (cur < due) {
+    days.push(cur.toISOString().slice(0, 10));
+    cur.setDate(cur.getDate() + 1);
+  }
+  // Always leave the last day before due as a buffer, unless range is 0–1 days
+  if (days.length > 2) days.pop();
+  return days.length ? days : [startDate];
+}
+
+/* Spread subtask definitions across available days.
+   Mapping is linear (ratio of position in list → ratio through day range),
+   which naturally front-loads easy early steps and back-loads review steps
+   because the templates themselves are ordered that way. */
+function distributeDefs(defs, days) {
+  const n = defs.length;
+  const d = days.length;
+  return defs.map((def, i) => {
+    const ratio  = n === 1 ? 0 : i / (n - 1);
+    const dayIdx = Math.min(Math.round(ratio * (d - 1)), d - 1);
+    return {
+      id:               uid(),
+      scheduledDate:    days[dayIdx],
+      title:            def.title,
+      notes:            def.notes || '',
+      estimatedMinutes: def.minutes || 10,
+      completed:        false,
+      completedAt:      null,
+    };
+  });
+}
+
+/* Strip leading articles so "the VPN guide" → "VPN guide" in subtask titles */
+function bare(task) { return task.name.replace(/^(a|an|the)\s+/i, ''); }
+
+/* ── Template matching ──────────────────────────────────────────────────── */
+function matchTemplate(task) {
+  const hay = (task.name + ' ' + (task.description || '')).toLowerCase();
+  if (/\btax(es|return|filing)?\b/.test(hay))                                          return taxDefs(task);
+  if (/audit|review.{0,20}doc(ument|s)?|doc(ument)?.{0,20}(audit|review)|knowledge.?base|\bkb\b/.test(hay)) return auditDefs(task);
+  if (/\b(write|draft|creat|author)\b.{0,35}\b(report|document|guide|article|blog|post|proposal|spec|brief|memo)\b/.test(hay)) return reportDefs(task);
+  if (/\b(send|write|reply|respond|answer|follow.?up).{0,30}\b(email|e-mail|message)\b|\bemail\b/.test(hay)) return emailDefs(task);
+  return null;
+}
+
+function taxDefs() {
+  return [
+    { title: 'Open tax software — or bookmark the IRS site to start fresh', minutes: 5 },
+    { title: 'Gather W-2s and any 1099s into one folder or stack', minutes: 10 },
+    { title: "Locate last year's return for reference", minutes: 5 },
+    { title: 'Enter W-2 income information', minutes: 15 },
+    { title: 'Enter any 1099 or freelance income', minutes: 10 },
+    { title: 'Enter deductions (mortgage interest, charitable donations, etc.)', minutes: 15 },
+    { title: 'Review applicable credits (education, child, energy, etc.)', minutes: 10 },
+    { title: 'Review all entries for accuracy — read through slowly', minutes: 15 },
+    { title: 'Run the built-in "check for errors" tool in the software', minutes: 10 },
+    { title: 'Submit / e-file the return', minutes: 10 },
+    { title: 'Save a PDF copy of the completed return somewhere safe', minutes: 5 },
+  ];
+}
+
+function auditDefs(task) {
+  const n = bare(task);
+  return [
+    { title: `Open the document list or index for "${n}"`, minutes: 5 },
+    { title: 'Count the total number of documents to review — write it down', minutes: 5 },
+    { title: 'Set up a tracking spreadsheet or simple checklist', minutes: 10 },
+    { title: 'Open the first document — check formatting against the style guide', minutes: 15 },
+    { title: "Check the first document's content accuracy and currency", minutes: 10 },
+    { title: 'Note any broken links or outdated references in the first doc', minutes: 10 },
+    { title: 'Review the next batch of 2–3 documents (formatting + content)', minutes: 15 },
+    { title: 'Log issues found so far into the tracking sheet', minutes: 10 },
+    { title: 'Work through the remaining documents', minutes: 15 },
+    { title: 'Compile all audit findings into a summary document', minutes: 15 },
+    { title: 'Prioritize issues by severity (critical / moderate / minor)', minutes: 10 },
+    { title: 'Draft recommendations or proposed next steps', minutes: 15 },
+    { title: `Final review of the audit summary for "${n}" — is it complete?`, minutes: 10 },
+  ];
+}
+
+function reportDefs(task) {
+  const n = bare(task);
+  return [
+    { title: `Open a blank document for "${n}"`, minutes: 5 },
+    { title: "Write one sentence describing this document's purpose", minutes: 5 },
+    { title: 'Draft a rough section outline — headings only, no content yet', minutes: 10 },
+    { title: 'Research and gather source material', minutes: 15 },
+    { title: 'Add bullet-point notes under each outline section', minutes: 15 },
+    { title: 'Draft the introduction', minutes: 15 },
+    { title: 'Draft the main body — work section by section', minutes: 15 },
+    { title: 'Draft the conclusion or summary', minutes: 10 },
+    { title: 'Read the full draft — note anything unclear or missing', minutes: 15 },
+    { title: 'Check formatting, headings, and any citations or links', minutes: 10 },
+    { title: `Final proofread of "${n}"`, minutes: 10 },
+    { title: `Submit or publish "${n}"`, minutes: 5 },
+  ];
+}
+
+function emailDefs(task) {
+  const n = bare(task);
+  return [
+    { title: 'Open your email client', minutes: 5 },
+    { title: 'Re-read the original email — or jot down the key points to communicate', minutes: 5 },
+    { title: "Draft the response or message — don't send yet", minutes: 10 },
+    { title: 'Read the draft out loud and revise anything that feels off', minutes: 10 },
+    { title: `Send "${n}"`, minutes: 5 },
+  ];
+}
+
+/* ── Generic fallback (effort-based) ────────────────────────────────────── */
+function genericDefs(task) {
+  const n = bare(task);
+
+  if (task.effort === 'small') {
+    return [
+      { title: `Open or pull up everything needed for "${n}"`, minutes: 5 },
+      { title: `Do the work: ${n}`, minutes: 15 },
+      { title: `Review "${n}" and confirm it's done`, minutes: 5 },
+    ];
+  }
+
+  if (task.effort === 'medium') {
+    return [
+      { title: `Open or pull up everything needed for "${n}"`, minutes: 5 },
+      { title: `Review what needs to be done — jot down any questions or blockers`, minutes: 10 },
+      { title: 'Gather any resources, files, or materials needed', minutes: 10 },
+      { title: `First work session: get started on "${n}"`, minutes: 15 },
+      { title: `Second work session: continue building momentum`, minutes: 15 },
+      { title: `Third work session: push toward the finish line`, minutes: 15 },
+      { title: `Review "${n}" for completeness`, minutes: 10 },
+      { title: `Finalize and wrap up "${n}"`, minutes: 10 },
+    ];
+  }
+
+  // large
+  return [
+    { title: `Open or pull up everything needed for "${n}"`, minutes: 5 },
+    { title: `Review what needs to be done — jot down questions or blockers`, minutes: 10 },
+    { title: 'Make a quick plan: what are the 3–5 main parts of this?', minutes: 10 },
+    { title: 'Gather all resources, files, or materials needed', minutes: 10 },
+    { title: `Work session 1: tackle the first part of "${n}"`, minutes: 15 },
+    { title: `Work session 2: continue with the next section`, minutes: 15 },
+    { title: `Work session 3: keep the momentum going`, minutes: 15 },
+    { title: `Work session 4: push into the harder parts`, minutes: 15 },
+    { title: `Work session 5: drive toward the finish line`, minutes: 15 },
+    { title: `Step back — review overall progress on "${n}"`, minutes: 10 },
+    { title: 'Revise anything that needs fixing based on your review', minutes: 15 },
+    { title: `Final review of "${n}" for completeness`, minutes: 10 },
+    { title: `Wrap up and finalize "${n}"`, minutes: 10 },
+  ];
+}
+
+/* Main entry point — called when a task is created */
+function generateSubtasks(task) {
+  const days = workingDays(task.startDate, task.dueDate);
+  const defs = matchTemplate(task) || genericDefs(task);
+  return distributeDefs(defs, days);
+}
+
 /* ── Modal ────────────────────────────────────────────────────────────────── */
 function openModal() {
   const now = todayStr();
@@ -1313,10 +1535,12 @@ function submitTask(e) {
     subtasks:    []
   };
 
+  task.subtasks = generateSubtasks(task);
   tasks.push(task);
   save();
   closeModal();
-  renderAll();
+  // Jump to Today so the user immediately sees their first step
+  switchView('today');
 }
 
 /* ── Helpers ──────────────────────────────────────────────────────────────── */
