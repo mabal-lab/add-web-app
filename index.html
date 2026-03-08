@@ -712,6 +712,22 @@
       100% { transform: translateY(100vh) rotate(700deg);  opacity: 0; }
     }
 
+    /* ── Sync indicator ─────────────────────────────────────────────────────── */
+    .header-right { display: flex; align-items: center; gap: 10px; }
+    .sync-indicator {
+      font-size: 11px;
+      font-weight: 600;
+      padding: 3px 10px;
+      border-radius: 100px;
+      letter-spacing: 0.01em;
+      white-space: nowrap;
+      transition: opacity 0.3s ease;
+    }
+    .sync-pending { background: var(--surface-alt); color: var(--text-muted); }
+    .sync-syncing { background: var(--amber-light);  color: var(--amber); }
+    .sync-synced  { background: var(--green-light);   color: var(--green); }
+    .sync-offline { background: #ffe4e6; color: #be123c; }
+
     /* ── Responsive ─────────────────────────────────────────────────────────── */
     @media (max-width: 500px) {
       .nav-btn      { font-size: 12px; padding: 9px 3px; }
@@ -727,7 +743,10 @@
   <!-- ── Header ───────────────────────────────────────────────────────────── -->
   <header class="header">
     <div class="header-wordmark">✦ <span>Focus</span></div>
-    <div class="header-date" id="js-date"></div>
+    <div class="header-right">
+      <div id="js-sync" class="sync-indicator" hidden></div>
+      <div class="header-date" id="js-date"></div>
+    </div>
   </header>
 
   <!-- ── Daily progress ───────────────────────────────────────────────────── -->
