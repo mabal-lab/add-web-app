@@ -305,16 +305,82 @@
       padding: 2px 7px;
       border-radius: 100px;
       font-weight: 500;
+      cursor: pointer;
+      transition: background var(--transition), color var(--transition);
+    }
+    .time-chip:hover { background: var(--amber-light); color: var(--amber); }
+    .date-chip {
+      font-size: 11px;
+      color: var(--text-muted);
+      background: var(--surface-alt);
+      padding: 2px 7px;
+      border-radius: 100px;
+      font-weight: 500;
+      cursor: pointer;
+      transition: background var(--transition), color var(--transition);
+    }
+    .date-chip:hover { background: var(--blue-light); color: var(--blue); }
+    .chip-edit-input {
+      border: none;
+      border-bottom: 2px solid var(--blue);
+      background: transparent;
+      font-size: 11px;
+      font-weight: 500;
+      font-family: inherit;
+      color: var(--text-primary);
+      outline: none;
+      padding: 0 2px;
+    }
+    .chip-edit-input[type="number"] { width: 48px; }
+    .chip-edit-input[type="date"]   { width: 122px; }
+
+    /* reorder buttons */
+    .card-reorder {
+      display: flex;
+      flex-direction: column;
+      gap: 2px;
+      flex-shrink: 0;
+      opacity: 0;
+      transition: opacity var(--transition);
+    }
+    .subtask-card:hover .card-reorder { opacity: 1; }
+    .reorder-btn {
+      background: none;
+      border: 1px solid transparent;
+      cursor: pointer;
+      color: var(--text-muted);
+      font-size: 9px;
+      padding: 2px 5px;
+      border-radius: 4px;
+      line-height: 1;
+      font-family: inherit;
+    }
+    .reorder-btn:hover {
+      background: var(--surface-alt);
+      border-color: var(--border);
+      color: var(--text-secondary);
     }
 
     /* notes */
     .card-notes {
-      margin-top: 9px;
+      margin-top: 6px;
       padding-left: 38px;
     }
-    .card-notes textarea {
+    .note-toggle {
+      background: none;
+      border: none;
+      cursor: pointer;
+      font-size: 11px;
+      color: var(--text-muted);
+      font-family: inherit;
+      padding: 2px 0;
+      transition: color var(--transition);
+    }
+    .note-toggle:hover { color: var(--blue); }
+    .note-ta {
+      display: none;
       width: 100%;
-      padding: 7px 10px;
+      padding: 6px 9px;
       border: 1.5px solid var(--border);
       border-radius: var(--radius-sm);
       font-size: 12px;
@@ -326,12 +392,30 @@
       transition: border-color var(--transition), background var(--transition);
       min-height: 32px;
       line-height: 1.5;
+      margin-top: 4px;
     }
-    .card-notes textarea:focus {
-      border-color: var(--blue);
-      background: var(--surface);
+    .note-ta.open { display: block; }
+    .note-ta:focus { border-color: var(--blue); background: var(--surface); }
+    .note-ta::placeholder { color: var(--text-muted); }
+
+    /* saved toast */
+    #saved-toast {
+      position: fixed;
+      bottom: 22px;
+      left: 50%;
+      transform: translateX(-50%) translateY(8px);
+      background: #2a2a2a;
+      color: #fff;
+      font-size: 12px;
+      font-weight: 600;
+      padding: 5px 16px;
+      border-radius: 100px;
+      opacity: 0;
+      pointer-events: none;
+      transition: opacity .2s ease, transform .2s ease;
+      z-index: 9999;
     }
-    .card-notes textarea::placeholder { color: var(--text-muted); }
+    #saved-toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
 
     /* ── Checkbox ───────────────────────────────────────────────────────────── */
     .cb-wrap { flex-shrink: 0; width: 26px; height: 26px; margin-top: 1px; }
@@ -777,6 +861,9 @@
 <!-- ── Confetti canvas ───────────────────────────────────────────────────── -->
 <div id="confetti" aria-hidden="true"></div>
 
+<!-- ── Saved toast ───────────────────────────────────────────────────────── -->
+<div id="saved-toast" aria-live="polite" aria-atomic="true">Saved ✓</div>
+
 <!-- ═══════════════════════════════════════════════════════════════════════════
      JAVASCRIPT
      ═══════════════════════════════════════════════════════════════════════════ -->
@@ -974,6 +1061,10 @@ function makeSubtaskCard(task, st, showParent) {
   card.dataset.sid = st.id;
   card.dataset.tid = task.id;
 
+  const hasNotes = !!(st.notes && st.notes.trim());
+  const mins     = st.estimatedMinutes || 10;
+  const dateLbl  = st.scheduledDate ? fmtDateChip(st.scheduledDate) : '';
+
   card.innerHTML = `
     <div class="card-row">
       <div class="cb-wrap">
@@ -985,35 +1076,66 @@ function makeSubtaskCard(task, st, showParent) {
         ${showParent ? `<div class="card-parent">${esc(task.name)}</div>` : ''}
         <div class="subtask-title" title="Click to edit">${esc(st.title)}</div>
         <div class="card-meta">
-          ${st.estimatedMinutes ? `<span class="time-chip">⏱ ${st.estimatedMinutes} min</span>` : ''}
+          <span class="time-chip" title="Click to edit time estimate">⏱ ${mins} min</span>
+          ${dateLbl ? `<span class="date-chip" title="Click to reschedule">📅 ${esc(dateLbl)}</span>` : ''}
         </div>
+      </div>
+      <div class="card-reorder">
+        <button class="reorder-btn" title="Move earlier" data-dir="up">▲</button>
+        <button class="reorder-btn" title="Move later"   data-dir="dn">▼</button>
       </div>
     </div>
     <div class="card-notes">
-      <textarea placeholder="Quick note for yourself…" rows="1"
+      <button class="note-toggle">${hasNotes ? '✏ edit note' : '+ add note'}</button>
+      <textarea class="note-ta ${hasNotes ? 'open' : ''}"
+                placeholder="Personal context, reminders, links…"
                 data-tid="${esc(task.id)}" data-sid="${esc(st.id)}">${esc(st.notes || '')}</textarea>
     </div>`;
 
-  // checkbox interaction
+  // checkbox
   const cb = card.querySelector('.cb');
   cb.addEventListener('click',   () => toggleSubtask(task.id, st.id, cb));
   cb.addEventListener('keydown', e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); cb.click(); }});
 
-  // inline title editing
+  // inline title
   bindTitleEdit(card.querySelector('.subtask-title'), task, st);
 
-  // notes auto-save + auto-resize
-  const ta = card.querySelector('textarea');
-  autoResize(ta);
-  ta.addEventListener('input',  () => autoResize(ta));
-  ta.addEventListener('change', () => saveNotes(task.id, st.id, ta.value));
+  // time chip
+  bindTimeEdit(card.querySelector('.time-chip'), task, st);
+
+  // date chip
+  const dateChipEl = card.querySelector('.date-chip');
+  if (dateChipEl) bindDateEdit(dateChipEl, task, st);
+
+  // reorder buttons
+  card.querySelectorAll('.reorder-btn').forEach(btn =>
+    btn.addEventListener('click', e => { e.stopPropagation(); reorderSubtask(task.id, st.id, btn.dataset.dir); })
+  );
+
+  // note toggle + textarea
+  const noteToggle = card.querySelector('.note-toggle');
+  const noteTa     = card.querySelector('.note-ta');
+  autoResize(noteTa);
+  noteToggle.addEventListener('click', () => {
+    const opening = !noteTa.classList.contains('open');
+    noteTa.classList.toggle('open', opening);
+    noteToggle.textContent = noteTa.value.trim()
+      ? (opening ? '✏ edit note' : '+ add note')
+      : (opening ? '✏ edit note' : '+ add note');
+    if (opening) { autoResize(noteTa); noteTa.focus(); }
+  });
+  noteTa.addEventListener('input',  () => autoResize(noteTa));
+  noteTa.addEventListener('change', () => {
+    saveNotes(task.id, st.id, noteTa.value);
+    noteToggle.textContent = noteTa.value.trim() ? '✏ edit note' : '+ add note';
+  });
 
   return card;
 }
 
 function bindTitleEdit(titleEl, task, st) {
   titleEl.addEventListener('click', () => {
-    if (titleEl.querySelector('input')) return; // already editing
+    if (titleEl.querySelector('input')) return;
     const prev = st.title;
     titleEl.classList.add('editing');
     titleEl.innerHTML = `<input class="title-edit-input" value="${esc(prev)}" />`;
@@ -1024,7 +1146,7 @@ function bindTitleEdit(titleEl, task, st) {
     function commit() {
       const val = input.value.trim() || prev;
       st.title = val;
-      save();
+      save(); showSaved();
       titleEl.classList.remove('editing');
       titleEl.textContent = val;
       bindTitleEdit(titleEl, task, st);
@@ -1034,7 +1156,6 @@ function bindTitleEdit(titleEl, task, st) {
       titleEl.textContent = prev;
       bindTitleEdit(titleEl, task, st);
     }
-
     input.addEventListener('blur', commit);
     input.addEventListener('keydown', e => {
       if (e.key === 'Enter')  { e.preventDefault(); input.blur(); }
@@ -1044,6 +1165,95 @@ function bindTitleEdit(titleEl, task, st) {
 }
 
 function autoResize(el) { el.style.height = 'auto'; el.style.height = el.scrollHeight + 'px'; }
+
+/* ── Saved toast ──────────────────────────────────────────────────────────── */
+let _toastTimer = null;
+function showSaved() {
+  const el = document.getElementById('saved-toast');
+  el.classList.add('show');
+  clearTimeout(_toastTimer);
+  _toastTimer = setTimeout(() => el.classList.remove('show'), 1400);
+}
+
+/* ── Date chip label ──────────────────────────────────────────────────────── */
+function fmtDateChip(dateStr) {
+  const d    = new Date(dateStr + 'T00:00:00');
+  const diff = Math.round((d - new Date(todayStr() + 'T00:00:00')) / 86400000);
+  if (diff ===  0) return 'Today';
+  if (diff ===  1) return 'Tomorrow';
+  if (diff === -1) return 'Yesterday';
+  if (diff > 1 && diff < 7) return d.toLocaleDateString('en-US', { weekday: 'short' });
+  return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+}
+
+/* ── Time chip inline edit ────────────────────────────────────────────────── */
+function bindTimeEdit(chip, task, st) {
+  chip.addEventListener('click', () => {
+    if (chip.querySelector('input')) return;
+    const prev = st.estimatedMinutes || 10;
+    chip.innerHTML = `<input class="chip-edit-input" type="number" min="1" max="480" value="${prev}" />`;
+    const inp = chip.querySelector('input');
+    inp.focus(); inp.select();
+    function commit() {
+      const val = Math.max(1, Math.min(480, parseInt(inp.value) || prev));
+      st.estimatedMinutes = val;
+      save(); showSaved();
+      chip.textContent = `⏱ ${val} min`;
+      bindTimeEdit(chip, task, st);
+    }
+    inp.addEventListener('blur', commit);
+    inp.addEventListener('keydown', e => {
+      if (e.key === 'Enter')  { e.preventDefault(); inp.blur(); }
+      if (e.key === 'Escape') { e.preventDefault(); inp.removeEventListener('blur', commit); chip.textContent = `⏱ ${prev} min`; bindTimeEdit(chip, task, st); }
+    });
+  });
+}
+
+/* ── Date chip inline edit ────────────────────────────────────────────────── */
+function bindDateEdit(chip, task, st) {
+  chip.addEventListener('click', () => {
+    if (chip.querySelector('input')) return;
+    const prev = st.scheduledDate;
+    chip.innerHTML = `<input class="chip-edit-input" type="date" value="${esc(prev || '')}" />`;
+    const inp = chip.querySelector('input');
+    inp.focus();
+    function commit() {
+      if (inp.value && inp.value !== prev) {
+        st.scheduledDate = inp.value;
+        save(); showSaved();
+        refreshDailyProgress();
+        renderCurrent();
+      } else {
+        chip.textContent = `📅 ${fmtDateChip(prev)}`;
+        bindDateEdit(chip, task, st);
+      }
+    }
+    inp.addEventListener('blur', commit);
+    inp.addEventListener('change', () => inp.blur()); // pick fires immediately
+    inp.addEventListener('keydown', e => {
+      if (e.key === 'Escape') { e.preventDefault(); inp.removeEventListener('blur', commit); chip.textContent = `📅 ${fmtDateChip(prev)}`; bindDateEdit(chip, task, st); }
+    });
+  });
+}
+
+/* ── Reorder subtask within its day ──────────────────────────────────────── */
+function reorderSubtask(tid, sid, dir) {
+  const task = tasks.find(t => t.id === tid);
+  if (!task) return;
+  const st = task.subtasks.find(s => s.id === sid);
+  if (!st) return;
+  // Peers on the same day, in current array order
+  const peers  = task.subtasks.filter(s => s.scheduledDate === st.scheduledDate);
+  const posDay = peers.findIndex(s => s.id === sid);
+  const swapAt = dir === 'up' ? posDay - 1 : posDay + 1;
+  if (swapAt < 0 || swapAt >= peers.length) return;
+  // Find positions in the main subtasks array and swap
+  const ai = task.subtasks.findIndex(s => s.id === peers[posDay].id);
+  const bi = task.subtasks.findIndex(s => s.id === peers[swapAt].id);
+  [task.subtasks[ai], task.subtasks[bi]] = [task.subtasks[bi], task.subtasks[ai]];
+  save(); showSaved();
+  renderCurrent();
+}
 
 /* ── Mini progress bar HTML ───────────────────────────────────────────────── */
 function miniProgressHTML(task) {
@@ -1273,7 +1483,7 @@ function saveNotes(tid, sid, val) {
   const st = task.subtasks.find(s => s.id === sid);
   if (!st) return;
   st.notes = val;
-  save();
+  save(); showSaved();
 }
 
 /* ── Focus mode ──────────────────────────────────────────────────────────── */
